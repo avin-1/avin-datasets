@@ -4,6 +4,10 @@ import sqlite3
 from langchain_huggingface import HuggingFaceEndpoint
 from langchain.prompts import PromptTemplate
 from langchain_core.runnables import RunnableSequence
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.orm import sessionmaker
+from models import Base, Customer, Employee, Department, Product, Inventory, Order, OrderItem, Payment
+import datetime
 
 # ---------- Load Hugging Face token from .env ----------
 load_dotenv()
@@ -11,134 +15,81 @@ HF_TOKEN = os.getenv("HF_TOKEN")
 if not HF_TOKEN:
     raise ValueError("HF_TOKEN missing in .env")
 
-# ---------- Define Database Schema and Sample Data ----------
-schema = """
--- === Tables ===
-CREATE TABLE Customers (
-    customer_id   INTEGER PRIMARY KEY,
-    name          TEXT NOT NULL,
-    email         TEXT UNIQUE,
-    city          TEXT,
-    signup_date   DATE
-);
-
-CREATE TABLE Employees (
-    employee_id   INTEGER PRIMARY KEY,
-    name          TEXT,
-    role          TEXT,
-    hire_date     DATE,
-    salary        REAL
-);
-
-CREATE TABLE Departments (
-    department_id INTEGER PRIMARY KEY,
-    name          TEXT,
-    manager_id    INTEGER,
-    FOREIGN KEY(manager_id) REFERENCES Employees(employee_id)
-);
-
-CREATE TABLE Products (
-    product_id    INTEGER PRIMARY KEY,
-    name          TEXT,
-    category      TEXT,
-    price         REAL,
-    department_id INTEGER,
-    FOREIGN KEY(department_id) REFERENCES Departments(department_id)
-);
-
-CREATE TABLE Inventory (
-    inventory_id  INTEGER PRIMARY KEY,
-    product_id    INTEGER,
-    stock_level   INTEGER,
-    last_update   DATETIME,
-    FOREIGN KEY(product_id) REFERENCES Products(product_id)
-);
-
-CREATE TABLE Orders (
-    order_id      INTEGER PRIMARY KEY,
-    customer_id   INTEGER,
-    employee_id   INTEGER,
-    order_date    DATETIME,
-    status        TEXT,
-    FOREIGN KEY(customer_id) REFERENCES Customers(customer_id),
-    FOREIGN KEY(employee_id) REFERENCES Employees(employee_id)
-);
-
-CREATE TABLE OrderItems (
-    order_item_id INTEGER PRIMARY KEY,
-    order_id      INTEGER,
-    product_id    INTEGER,
-    quantity      INTEGER,
-    unit_price    REAL,
-    FOREIGN KEY(order_id) REFERENCES Orders(order_id),
-    FOREIGN KEY(product_id) REFERENCES Products(product_id)
-);
-
-CREATE TABLE Payments (
-    payment_id    INTEGER PRIMARY KEY,
-    order_id      INTEGER,
-    amount        REAL,
-    payment_date  DATETIME,
-    method        TEXT,
-    FOREIGN KEY(order_id) REFERENCES Orders(order_id)
-);
-"""
-
-sample_data = """
-INSERT INTO Customers (name,email,city,signup_date)
-VALUES ('Alice','alice@example.com','Mumbai','2024-02-12'),
-       ('Bob','bob@example.com','Delhi','2024-05-21');
-
-INSERT INTO Employees (name,role,hire_date,salary)
-VALUES ('Jane','Sales Rep','2023-03-10',65000),
-       ('Mark','Manager','2022-07-01',90000);
-
-INSERT INTO Departments (name,manager_id)
-VALUES ('Electronics',2), ('Home Appliances',2);
-
-INSERT INTO Products (name,category,price,department_id)
-VALUES ('Laptop','Computers',80000,1),
-       ('Microwave','Kitchen',15000,2);
-
-INSERT INTO Inventory (product_id,stock_level,last_update)
-VALUES (1,10,'2025-09-01 10:00'), (2,25,'2025-09-01 10:00');
-
-INSERT INTO Orders (customer_id,employee_id,order_date,status)
-VALUES (1,1,'2025-09-10 15:30','Shipped');
-
-INSERT INTO OrderItems (order_id,product_id,quantity,unit_price)
-VALUES (1,1,1,80000);
-
-INSERT INTO Payments (order_id,amount,payment_date,method)
-VALUES (1,80000,'2025-09-11 09:00','Credit Card');
-"""
-
-# ---------- Create and populate the database ----------
+# ---------- Database Setup ----------
 DB_PATH = "ecom.db"
-conn = sqlite3.connect(DB_PATH)
-conn.executescript(schema)
-conn.executescript(sample_data)
-conn.commit()
-conn.close()
-print("Database ecom.db created with sample data.")
+engine = create_engine(f"sqlite:///{DB_PATH}")
+Session = sessionmaker(bind=engine)
 
-# ---------- Connect for querying and LLM setup ----------
-conn = sqlite3.connect(DB_PATH)
+def create_and_populate_db():
+    """Create the database and populate it with sample data."""
+    Base.metadata.create_all(engine)
+    session = Session()
+
+    # Check if data already exists
+    if session.query(Customer).first():
+        print("Database already populated.")
+        session.close()
+        return
+
+    # Sample Data
+    customers = [
+        Customer(name='Alice', email='alice@example.com', city='Mumbai', signup_date=datetime.date(2024, 2, 12)),
+        Customer(name='Bob', email='bob@example.com', city='Delhi', signup_date=datetime.date(2024, 5, 21))
+    ]
+
+    employees = [
+        Employee(name='Jane', role='Sales Rep', hire_date=datetime.date(2023, 3, 10), salary=65000),
+        Employee(name='Mark', role='Manager', hire_date=datetime.date(2022, 7, 1), salary=90000)
+    ]
+
+    departments = [
+        Department(name='Electronics', manager_id=2),
+        Department(name='Home Appliances', manager_id=2)
+    ]
+
+    products = [
+        Product(name='Laptop', category='Computers', price=80000, department_id=1),
+        Product(name='Microwave', category='Kitchen', price=15000, department_id=2)
+    ]
+
+    inventory = [
+        Inventory(product_id=1, stock_level=10, last_update=datetime.datetime(2025, 9, 1, 10, 0)),
+        Inventory(product_id=2, stock_level=25, last_update=datetime.datetime(2025, 9, 1, 10, 0))
+    ]
+
+    orders = [
+        Order(customer_id=1, employee_id=1, order_date=datetime.datetime(2025, 9, 10, 15, 30), status='Shipped')
+    ]
+
+    order_items = [
+        OrderItem(order_id=1, product_id=1, quantity=1, unit_price=80000)
+    ]
+
+    payments = [
+        Payment(order_id=1, amount=80000, payment_date=datetime.datetime(2025, 9, 11, 9, 0), method='Credit Card')
+    ]
+
+    session.add_all(customers)
+    session.add_all(employees)
+    session.add_all(departments)
+    session.add_all(products)
+    session.add_all(inventory)
+    session.add_all(orders)
+    session.add_all(order_items)
+    session.add_all(payments)
+
+    session.commit()
+    session.close()
+    print("Database ecom.db created and populated with sample data.")
 
 def fetch_db_schema() -> str:
-    """Return a text description of all tables/columns in the SQLite DB."""
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT m.name as table_name, p.name as column_name, p.type as data_type
-        FROM sqlite_master m
-        JOIN pragma_table_info(m.name) p
-        WHERE m.type='table'
-        ORDER BY table_name
-    """)
+    """Return a text description of all tables/columns in the database."""
+    inspector = inspect(engine)
     schema_str = ""
-    for t, c, d in cur.fetchall():
-        schema_str += f"Table {t}: column {c} ({d})\n"
-    cur.close()
+    for table_name in inspector.get_table_names():
+        schema_str += f"Table {table_name}:\n"
+        for column in inspector.get_columns(table_name):
+            schema_str += f"  - {column['name']} ({column['type']})\n"
     return schema_str
 
 # ---------- LLM endpoint with a reliable model ----------
@@ -184,18 +135,11 @@ def ask_db(nl_query: str):
         sql_query += ';'
 
     print("Generated SQL:", sql_query)
-    cur = conn.cursor()
-    cur.execute(sql_query)
-    rows = cur.fetchall()
-    cur.close()
-    return rows
+
+    with engine.connect() as connection:
+        result = connection.execute(text(sql_query))
+        rows = result.fetchall()
+        return rows
 
 if __name__ == "__main__":
-    while True:
-        q = input("\nAsk in plain English (or 'exit'): ")
-        if q.lower().startswith("exit"):
-            break
-        try:
-            print("Result:", ask_db(q))
-        except Exception as e:
-            print("Error:", e)
+    create_and_populate_db()
