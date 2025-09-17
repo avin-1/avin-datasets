@@ -1,0 +1,1 @@
+Show the names and salaries of employees who earn more than 70 000.
